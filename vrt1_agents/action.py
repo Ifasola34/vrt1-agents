@@ -81,6 +81,28 @@ class AgentAction:
     parent_action: str | None = None
     v: int = 1
 
+    def __post_init__(self) -> None:
+        # Validate shapes that the schema declares but Python's runtime
+        # doesn't enforce. params/outcome MUST be dicts — anything else
+        # (string, null, list) is invalid input that would otherwise
+        # canonical-serialize and verify just fine but break every
+        # downstream consumer that calls `.get(...)` on them.
+        if not isinstance(self.params, dict):
+            raise ValueError(
+                f"params must be a dict, got {type(self.params).__name__}"
+            )
+        if not isinstance(self.outcome, dict):
+            raise ValueError(
+                f"outcome must be a dict, got {type(self.outcome).__name__}"
+            )
+        # Normalize empty-string parent_action to None — otherwise an
+        # action with parent_action='' hashes differently from one with
+        # parent_action=None (the empty string survives into the
+        # canonical payload), creating semantic ambiguity where two
+        # "no parent" actions get different action_ids.
+        if self.parent_action == "":
+            object.__setattr__(self, "parent_action", None)
+
     def to_payload(self) -> dict[str, Any]:
         d = asdict(self)
         if d.get("parent_action") is None:

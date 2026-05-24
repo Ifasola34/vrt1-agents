@@ -30,7 +30,7 @@ def test_event_roundtrip_preserves_signed_action():
     assert decoded.verify()
 
 
-def test_event_tags_include_d_t_p():
+def test_event_tags_include_d_t_e_no_p():
     k = OracleKey.generate()
     a = make_action(
         agent_pubkey_hex=k.xonly_pubkey_hex,
@@ -39,10 +39,70 @@ def test_event_tags_include_d_t_p():
     signed = sign_action(a, k)
     evt = build_action_event(signed, k)
     tag_keys = {t[0] for t in evt.tags}
-    assert {"d", "t", "p", "e"}.issubset(tag_keys)
+    assert {"d", "t", "e"}.issubset(tag_keys)
     assert ["t", "vouch"] in evt.tags
-    assert ["p", k.xonly_pubkey_hex] in evt.tags
     assert ["e", "bb" * 32] in evt.tags
+    # No self-pointing p-tag (NIP-01 reserves p for OTHER pubkeys).
+    assert "p" not in tag_keys
+
+
+def test_decode_rejects_outer_event_signed_by_unrelated_key():
+    """High-severity round-2 finding: decode_action_event must verify
+    the OUTER Nostr event sig so an attacker can't re-wrap a valid
+    SignedAction under a different key and have it accepted."""
+    alice = OracleKey.generate()
+    eve = OracleKey.generate()
+    a = make_action(
+        agent_pubkey_hex=alice.xonly_pubkey_hex,
+        action_type="review", target="https://x",
+    )
+    signed_by_alice = sign_action(a, alice)
+    # Eve builds a Nostr event around Alice's signed action but signs
+    # the OUTER event with her own key. The inner SignedAction sig
+    # still verifies (Alice signed it), but the Nostr layer claim
+    # "Eve published this" is a lie.
+    import base64
+    forged_evt = NostrEvent(
+        pubkey=eve.xonly_pubkey_hex,
+        created_at=signed_by_alice.action.ts,
+        kind=KIND_AGENT_ACTION,
+        tags=[["d", signed_by_alice.id], ["t", "review"]],
+    )
+    forged_evt.content = base64.b64encode(
+        signed_by_alice.to_json().encode("utf-8"),
+    ).decode("ascii")
+    forged_evt.sign(eve)
+
+    with pytest.raises(ValueError, match="match outer Nostr event"):
+        decode_action_event(forged_evt)
+
+
+def test_decode_verify_outer_false_bypasses_check():
+    """The verify_outer=False escape hatch lets callers skip the outer
+    check when they've verified it separately or genuinely don't care."""
+    alice = OracleKey.generate()
+    eve = OracleKey.generate()
+    a = make_action(
+        agent_pubkey_hex=alice.xonly_pubkey_hex,
+        action_type="review", target="x",
+    )
+    signed_by_alice = sign_action(a, alice)
+    import base64
+    forged_evt = NostrEvent(
+        pubkey=eve.xonly_pubkey_hex,
+        created_at=signed_by_alice.action.ts,
+        kind=KIND_AGENT_ACTION,
+        tags=[["d", signed_by_alice.id], ["t", "review"]],
+    )
+    forged_evt.content = base64.b64encode(
+        signed_by_alice.to_json().encode("utf-8"),
+    ).decode("ascii")
+    forged_evt.sign(eve)
+
+    sa = decode_action_event(forged_evt, verify_outer=False)
+    # Inner sig still valid (Alice signed the inner action), caller
+    # opts into trusting that without the transport-layer check.
+    assert sa.verify()
 
 
 def test_event_no_e_tag_when_no_parent():

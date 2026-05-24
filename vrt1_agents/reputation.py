@@ -24,6 +24,16 @@ What we compute, in order of complexity:
 A trust score is intentionally NOT baked in here. Anyone consuming
 these primitives can apply their own weighting (PageRank, time decay,
 domain-specific filters). v0.1 ships the substrate, not opinions.
+
+WARNING — Sybil resistance is OUT OF SCOPE. Nothing here prevents one
+operator from generating N fresh BIP-340 keys and having them all
+vouch for one target agent: in_degree = N. Vouch graph cycles
+(Alice → Bob → Alice) inflate both agents' in-degrees even without
+multiple keys. Anyone treating these metrics as authoritative MUST
+layer external trust signals on top (cost-of-existence proofs,
+known-identity gating, peer-trust weighting, etc.). The library
+gives you cryptographically-bound claims; turning those into trust
+is your problem.
 """
 
 from __future__ import annotations
@@ -176,7 +186,10 @@ def build_vouch_graph(actions: Iterable[SignedAction]) -> VouchGraph:
         if not pid or pid not in by_id:
             continue
         parent = by_id[pid]
-        # Self-vouches don't add reputation — same agent on both ends.
+        # Direct self-vouches don't add reputation (Alice vouches for
+        # her own action). Note: this does NOT block transitive cycles
+        # (Alice → Bob → Alice) which inflate both agents' in-degrees.
+        # Cycle detection / SCC removal is the caller's responsibility.
         if sa.action.agent == parent.action.agent:
             continue
         if sa.action.action_type == "vouch":

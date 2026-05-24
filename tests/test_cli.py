@@ -102,8 +102,32 @@ def test_verify_reports_invalid_for_tampered_action(tmp_path: Path):
 
     runner = CliRunner()
     r = runner.invoke(cli, ["verify", str(p)])
-    assert r.exit_code == 0  # the verify subcommand always succeeds in printing
+    # Round-2 fix: verify now exits 1 on INVALID for script-gating.
+    assert r.exit_code == 1
     assert "INVALID" in r.output
+
+
+def test_reputation_surfaces_corpus_load_errors(tmp_path: Path):
+    """Round-2 fix: silent skip of malformed files is gone; the
+    reputation command now reports how many files failed to parse."""
+    k = OracleKey.generate()
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    signed = sign_action(make_action(
+        agent_pubkey_hex=k.xonly_pubkey_hex,
+        action_type="review", target="x",
+    ), k)
+    (corpus / "01.json").write_text(signed.to_json())
+    (corpus / "02_torn.json").write_text('{"act')
+    (corpus / "03_wrong_shape.json").write_text('{"hello":"world"}')
+
+    runner = CliRunner()
+    r = runner.invoke(cli, ["reputation",
+                            "--corpus", str(corpus),
+                            "--agent", k.xonly_pubkey_hex])
+    assert r.exit_code == 0
+    assert "skipped" in r.output.lower()
+    assert "2 unparseable" in r.output
 
 
 def test_reputation_dumps_summary_for_agent(tmp_path: Path):

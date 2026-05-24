@@ -11,6 +11,7 @@ Subcommands:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import click
@@ -104,7 +105,11 @@ def sign(key_path: str, spec_path: str, out: str | None) -> None:
 @cli.command()
 @click.argument("action_file", type=click.Path(exists=True))
 def verify(action_file: str) -> None:
-    """Verify a SignedAction's Schnorr signature."""
+    """Verify a SignedAction's Schnorr signature.
+
+    Exits 0 on VALID, 1 on INVALID — so scripts can gate on the result
+    (`vrt1-agent verify a.json && deploy.sh`).
+    """
     try:
         signed = SignedAction.from_json(Path(action_file).read_text())
     except (ValueError, KeyError, json.JSONDecodeError) as e:
@@ -114,6 +119,7 @@ def verify(action_file: str) -> None:
         "[bold green]VALID[/bold green]" if ok else "[bold red]INVALID[/bold red]",
         title=f"action {signed.id[:16]}…", border_style="green" if ok else "red",
     ))
+    sys.exit(0 if ok else 1)
 
 
 @cli.command()
@@ -139,14 +145,23 @@ def inspect(action_file: str) -> None:
     console.print(t)
 
 
-def _load_corpus(corpus_dir: str) -> list[SignedAction]:
+def _load_corpus(
+    corpus_dir: str,
+) -> tuple[list[SignedAction], list[tuple[Path, str]]]:
+    """Load actions from a directory, returning (loaded, errors).
+
+    Errors are (path, reason) tuples for any file that failed to
+    parse — surfaced to the user instead of silently dropped, so
+    forensic blind spots don't mask attacks or torn writes.
+    """
     actions: list[SignedAction] = []
+    errors: list[tuple[Path, str]] = []
     for p in sorted(Path(corpus_dir).glob("*.json")):
         try:
             actions.append(SignedAction.from_json(p.read_text()))
-        except (ValueError, KeyError, json.JSONDecodeError):
-            continue  # skip junk files silently
-    return actions
+        except (ValueError, KeyError, json.JSONDecodeError) as e:
+            errors.append((p, f"{type(e).__name__}: {e}"))
+    return actions, errors
 
 
 @cli.command()
@@ -155,7 +170,7 @@ def _load_corpus(corpus_dir: str) -> list[SignedAction]:
 @click.option("--agent", required=True, help="x-only pubkey hex of the agent to summarize.")
 def reputation(corpus: str, agent: str) -> None:
     """Aggregate a corpus and dump reputation for one agent."""
-    actions = _load_corpus(corpus)
+    actions, errors = _load_corpus(corpus)
     if not actions:
         raise click.ClickException(f"no parseable SignedActions found in {corpus}")
 
@@ -163,11 +178,22 @@ def reputation(corpus: str, agent: str) -> None:
     summ = summarize(agent, actions)
     graph = build_vouch_graph(actions)
 
-    console.print(Panel.fit(
-        f"Corpus: {len(actions)} signed actions\n"
+    summary_lines = [
+        f"Corpus: {len(actions)} signed actions",
         f"Agent:  {agent}",
-        border_style="cyan",
-    ))
+    ]
+    if errors:
+        summary_lines.append(
+            f"[yellow]skipped:[/yellow] {len(errors)} unparseable file(s) "
+            "(use --verbose for paths)"
+        )
+    console.print(Panel.fit("\n".join(summary_lines), border_style="cyan"))
+
+    if errors:
+        for p, reason in errors[:5]:
+            console.print(f"  [yellow]skipped[/yellow] {p.name}: {reason}", style="dim")
+        if len(errors) > 5:
+            console.print(f"  [yellow]...and {len(errors) - 5} more[/yellow]", style="dim")
 
     t = Table(title="History")
     t.add_column("ts"); t.add_column("type"); t.add_column("target"); t.add_column("valid?")
