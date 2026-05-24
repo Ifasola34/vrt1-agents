@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vrt1-agents"
+version = "0.1.0"
+description = "Signed agent-action attestations for the VERITAS (VRT1) protocol. Lets autonomous agents emit cryptographically signed, peer-verifiable records of what they did, what they reviewed, and who they vouched for."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Ifasola34"},
+]
+keywords = ["bitcoin", "nostr", "attestation", "agents", "reputation", "veritas"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = [
+    "veritas @ git+https://github.com/Ifasola34/veritas.git",
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+vrt1-agent = "vrt1_agents.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Ifasola34/vrt1-agents"
+"VERITAS Protocol" = "https://github.com/Ifasola34/veritas"
+Verifier = "https://github.com/Ifasola34/vrt1-verifier"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
