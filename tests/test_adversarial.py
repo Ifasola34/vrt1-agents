@@ -164,6 +164,83 @@ def test_decode_rejects_outer_event_signed_by_eve(two_agents_review_and_vouch):
         decode_action_event(forged_evt)
 
 
+def test_decode_rejects_event_with_corrupted_inner_sig(two_agents_review_and_vouch):
+    """Round-3 fix: decode_action_event verifies BOTH the outer Nostr
+    sig AND the inner SignedAction sig. An event with a valid outer
+    wrapper but a corrupted inner sig (torn write, attacker who can
+    sign Nostr events but not the inner action) used to silently
+    return the SignedAction; now it raises."""
+    h = two_agents_review_and_vouch
+    # Build a fresh event where Alice signs everything legitimately,
+    # then tamper the inner action's outcome (which invalidates the
+    # inner sig but leaves the OUTER event valid because we re-sign).
+    real_evt = build_action_event(h["review"], h["alice"])
+    # Decode + mutate the inner JSON + re-base64 + re-sign the OUTER.
+    inner = json.loads(base64.b64decode(real_evt.content))
+    inner["action"]["outcome"] = {"verdict": "tampered"}
+    new_content = base64.b64encode(json.dumps(inner).encode()).decode()
+    forged_evt = NostrEvent(
+        pubkey=h["alice"].xonly_pubkey_hex,
+        created_at=real_evt.created_at,
+        kind=KIND_AGENT_ACTION,
+        tags=real_evt.tags,
+    )
+    forged_evt.content = new_content
+    forged_evt.sign(h["alice"])   # Alice re-signs the OUTER
+
+    # Outer verifies (Alice signed it), inner doesn't (sig is for
+    # original outcome). decode must catch this.
+    assert forged_evt.verify()  # outer OK
+    with pytest.raises(ValueError, match="inner SignedAction"):
+        decode_action_event(forged_evt)
+
+
+def test_from_json_normalizes_falsy_parent_action_values():
+    """Round-3 fix: from_json normalizes ALL falsy parent_action values
+    (None, '', 0, false, []) to None before construction. Previously
+    only literal empty string hit __post_init__; values like 0 or
+    null survived into canonical_bytes and produced different action_ids
+    for semantically-equivalent inputs."""
+    k = OracleKey.generate()
+    # Build the base no-parent payload manually so we control the JSON shape.
+    base_action = make_action(
+        agent_pubkey_hex=k.xonly_pubkey_hex,
+        action_type="review", target="x", ts=1700000000,
+        parent_action=None,
+    )
+    canonical_signed = sign_action(base_action, k)
+    canonical_id = canonical_signed.id
+
+    for weird_parent in [None, "", 0, False, []]:
+        body = json.loads(canonical_signed.to_json())
+        body["action"]["parent_action"] = weird_parent
+        sa = SignedAction.from_json(json.dumps(body))
+        assert sa.id == canonical_id, (
+            f"falsy parent_action={weird_parent!r} should produce the "
+            f"canonical no-parent action_id"
+        )
+
+
+def test_from_json_accepts_null_params_and_outcome():
+    """Round-3 fix: from_json coerces null params/outcome to {} so
+    a corpus file with explicit `"params": null` still loads. Without
+    this, round-2's strict type check in __post_init__ rejects None
+    and breaks backward compat."""
+    k = OracleKey.generate()
+    payload = json.dumps({
+        "action": {
+            "agent": k.xonly_pubkey_hex,
+            "action_type": "review", "target": "x",
+            "params": None, "outcome": None,
+            "ts": 1, "v": 1,
+        },
+        "sig": "00" * 64,
+    })
+    sa = SignedAction.from_json(payload)
+    assert sa.action.params == {}
+    assert sa.action.outcome == {}
+
+
 def test_decode_rejects_wrong_kind():
     k = OracleKey.generate()
     evt = NostrEvent(

@@ -66,16 +66,21 @@ def decode_action_event(
 ) -> SignedAction:
     """Inverse of build_action_event. Raises ValueError on malformed input.
 
-    By default we verify the OUTER Nostr event signature (event id +
-    Schnorr sig + pubkey) before extracting the inner SignedAction.
-    This prevents an attacker from re-wrapping a valid SignedAction in
-    a Nostr event signed by an unrelated key (which would otherwise be
-    accepted as "this agent published this action at created_at=T on
-    relay R" — a forged transport-layer claim).
+    By default we verify BOTH:
+      1. The OUTER Nostr event signature (event id + Schnorr sig +
+         pubkey) — prevents an attacker re-wrapping a valid SignedAction
+         under an unrelated Nostr key, which would otherwise fool a
+         caller into trusting the transport-layer claim "agent X
+         published this at created_at=T on relay R".
+      2. The INNER SignedAction signature — caller asks for a decoded
+         object; we should not return one whose inner sig fails verify.
+         Without this, a torn-write or attacker-crafted event with a
+         valid outer wrapper but corrupted inner sig would silently
+         return a SignedAction that callers might trust.
 
-    Pass `verify_outer=False` only when you've already verified the
-    Nostr layer separately (or genuinely don't care about the outer
-    authorship claim).
+    Pass `verify_outer=False` only when you've already verified BOTH
+    layers separately (or genuinely don't care about the outer
+    authorship + inner authenticity claims).
     """
     if evt.kind != KIND_AGENT_ACTION:
         raise ValueError(
@@ -85,10 +90,13 @@ def decode_action_event(
         raise ValueError("outer Nostr event signature is invalid")
     raw = base64.b64decode(evt.content)
     sa = SignedAction.from_json(raw)
-    if verify_outer and sa.action.agent != evt.pubkey:
-        raise ValueError(
-            "inner action.agent does not match outer Nostr event pubkey"
-        )
+    if verify_outer:
+        if sa.action.agent != evt.pubkey:
+            raise ValueError(
+                "inner action.agent does not match outer Nostr event pubkey"
+            )
+        if not sa.verify():
+            raise ValueError("inner SignedAction signature is invalid")
     return sa
 
 

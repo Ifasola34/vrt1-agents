@@ -159,15 +159,27 @@ class SignedAction:
             raw = raw.decode("utf-8")
         d = json.loads(raw)
         a = d["action"]
+        # Normalize JSON-null + falsy non-string parent_action values
+        # to None BEFORE construction. Without this, `parent_action: 0`
+        # or `parent_action: []` would survive the __post_init__ check
+        # (which only normalizes the literal empty string) and produce
+        # a different action_id than the canonical no-parent form.
+        parent = a.get("parent_action")
+        if not parent:
+            parent = None
+        # `a.get("params", {})` returns None when the JSON has
+        # `"params": null` (key present, value null). __post_init__
+        # rejects None as 'not a dict'. Coerce null/falsy to {} so a
+        # corpus with explicit null params/outcome still loads.
         return cls(
             action=AgentAction(
                 agent=a["agent"],
                 action_type=a["action_type"],
                 target=a["target"],
-                params=a.get("params", {}),
-                outcome=a.get("outcome", {}),
+                params=a.get("params") or {},
+                outcome=a.get("outcome") or {},
                 ts=int(a.get("ts", 0)),
-                parent_action=a.get("parent_action"),
+                parent_action=parent,
                 v=int(a.get("v", 1)),
             ),
             sig=d["sig"],

@@ -190,8 +190,17 @@ def reputation(corpus: str, agent: str) -> None:
     console.print(Panel.fit("\n".join(summary_lines), border_style="cyan"))
 
     if errors:
+        # Escape Rich markup chars in filenames AND exception messages.
+        # A corpus file named `01[bold].json` or an exception message
+        # containing `[`/`]` would otherwise break Rich's parser and
+        # render unpredictably.
+        from rich.markup import escape as _rich_escape
         for p, reason in errors[:5]:
-            console.print(f"  [yellow]skipped[/yellow] {p.name}: {reason}", style="dim")
+            console.print(
+                f"  [yellow]skipped[/yellow] {_rich_escape(p.name)}: "
+                f"{_rich_escape(reason)}",
+                style="dim",
+            )
         if len(errors) > 5:
             console.print(f"  [yellow]...and {len(errors) - 5} more[/yellow]", style="dim")
 
