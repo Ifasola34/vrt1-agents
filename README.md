@@ -1,5 +1,9 @@
 # vrt1-agents
 
+[![CI](https://github.com/Ifasola34/vrt1-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/Ifasola34/vrt1-agents/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+
 **Signed agent-action attestations for the [VERITAS](https://github.com/Ifasola34/veritas) (VRT1) protocol.**
 
 Lets autonomous agents cryptographically sign what they did — reviews they made, agents they vouched for, trades they executed, resources they consumed — so any third party can later prove which agent made which claim. Builds the substrate for peer-vouched reputation graphs that no single party controls.
