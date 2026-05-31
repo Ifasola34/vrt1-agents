@@ -19,12 +19,12 @@ schemas can evolve independently.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from veritas.attestation import canonical_json
 from veritas.crypto import (
     OracleKey,
     schnorr_sign,
@@ -48,18 +48,9 @@ KNOWN_TYPES = frozenset({
 })
 
 
-def canonical_json(obj: Any) -> bytes:
-    """Stable byte encoding — sorted keys, no whitespace, UTF-8 safe.
-
-    Same canonicalization rules VERITAS uses for attestation digests,
-    by design: same crypto stack, same domain-separation principles.
-    """
-    return json.dumps(
-        obj,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
+# canonical_json is imported from veritas — the single source of truth for the
+# exact bytes we hash and sign. Same crypto stack, same domain-separation
+# rules; only ACTION_TAG differs from VERITAS attestations.
 
 
 @dataclass
@@ -101,7 +92,7 @@ class AgentAction:
         # canonical payload), creating semantic ambiguity where two
         # "no parent" actions get different action_ids.
         if self.parent_action == "":
-            object.__setattr__(self, "parent_action", None)
+            self.parent_action = None
 
     def to_payload(self) -> dict[str, Any]:
         d = asdict(self)
